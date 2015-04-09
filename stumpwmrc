@@ -74,6 +74,7 @@
 ;; ```
 
 ;;; Code:
+(ql:quickload "cl-fad")
 (in-package :stumpwm)
 
 ;; (run-shell-command "rm .xsession-errors")
@@ -84,6 +85,7 @@
 (defvar *debian-menu-file* "/var/lib/stumpwm/stumpwm.menu")
 (defvar *stumpwm-dumpfile-dir* "~/.stumpwm-dumpfile.d")
 (defvar *emacs-daemon-name* "default")
+(defvar *emacsclient-last-load-file* nil)
 (defvar *stumpwm-temporary-directory* "/tmp/stumpwm")
 (setf *shell-program* (stumpwm::getenv "SHELL"))
 (setf *ignore-wm-inc-hints* t)
@@ -258,58 +260,45 @@
                       "--daemon")))
                 (message (format nil "emacs-daemon which name is \"~a\" is running ..." *emacs-daemon-name*))))
 
-(defun random-string (length)
-  "Return a random string with LENGTH characters."
-  (let ((alphabet (concat
-                   "abcdefghijklmnopqrstuvwxyz"
-                   "0123456789"
-                   "ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-        (string (make-string length)))
-    (map-into string (lambda (char)
-                       (declare (ignore char))
-                       (aref alphabet (random (length alphabet))))
-              string)))
-
 (defun emacsclient-eval (&optional expression create-frame frame-name file)
   "Eval an emacs lisp expression which emacsclient"
-  (let* ((expression-string
-          (generate-elisp-expression-string expression))
-         (name (or frame-name
-                   (escape-instance-name expression-string)))
-         (elisp-file
-          (make-pathname
-           :directory (pathname-directory (pathname-as-directory  *stumpwm-temporary-directory*))
-           :name (concat "emacsclient-load-file-" (random-string 10))
-           :type "el"))
-         (emacsclient-command
-          (format nil
-                  (concat "emacsclient ~@[--socket-name=~A ~]"
-                          "~:[ ~;-c~] ~@[-F '((name . \"~A\"))' ~]"
-                          "~@[--eval '(load \"~A\")' ~] ~@[~A~];")
-                  *emacs-daemon-name*
-                  create-frame
-                  name
-                  elisp-file
-                  file)))
-    ;; write emacs lisp sexp to a file, all symbol names
-    ;; will be converted to downcase when save.
-    (with-open-file
-        (stream (ensure-directories-exist elisp-file)
-                :direction :output
-                :if-exists :supersede)
+  (cl-fad:with-open-temporary-file (stream
+                                    :template "/tmp/stumpmw-emacsclient-load-file-%s.el"
+                                    :keep t)
+    (let* ((expression-string
+            (generate-elisp-expression-string expression))
+           (name (or frame-name
+                     (escape-instance-name expression-string)))
+           (elisp-file-name (namestring (pathname stream)))
+           (emacsclient-command
+            (format nil
+                    (concat "emacsclient ~@[--socket-name=~A ~]"
+                            "~:[ ~;-c~] ~@[-F '((name . \"~A\"))' ~]"
+                            "~@[--eval '(load \"~A\")' ~] ~@[~A~];")
+                    *emacs-daemon-name*
+                    create-frame
+                    name
+                    elisp-file-name
+                    file)))
+
+      ;; Delete last emacsclient-load-file
+      (let ((file *emacsclient-last-load-file*))
+        (when (and file (probe-file file))
+          (delete-file file)))
+
+      ;; write emacs lisp sexp to temp file, all symbol names
+      ;; will be converted to downcase when saved.
       (with-standard-io-syntax
-        (format stream "~A" expression-string)))
+        (format stream "~A" expression-string))
 
-    ;; start emacs daemon
-    (if (not (emacs-daemon-run-p))
-        (emacs-daemon-start)
-        (my-run-or-raise emacsclient-command `(:instance ,name)))
+      ;; start emacs daemon.
+      (if (not (emacs-daemon-run-p))
+          (emacs-daemon-start)
+          (my-run-or-raise emacsclient-command `(:instance ,name)))
 
-    ;; remove temporary elisp file
-    (when (probe-file elisp-file)
-      (run-shell-command
-       (format nil "sleep 3; rm ~A"
-               (namestring elisp-file))))))
+      ;; update *emacsclient-last-load-file*
+      (setf *emacsclient-last-load-file* elisp-file-name)
+      t)))
 
 (defcommand emacs () ()
             (emacsclient-eval '(recentf-open-files) t "emacs"))
@@ -682,40 +671,40 @@
     ))
 
 (defvar *emacs-map*
-      (let ((m (stumpwm:make-sparse-keymap)))
-        (stumpwm:define-key m (stumpwm:kbd "e") "emacs")
-        (stumpwm:define-key m (stumpwm:kbd "i") "org-contacts")
-        (stumpwm:define-key m (stumpwm:kbd "c") "calendar")
-        (stumpwm:define-key m (stumpwm:kbd "s") "eshell")
-        (stumpwm:define-key m (stumpwm:kbd "g") "gnus")
-        (stumpwm:define-key m (stumpwm:kbd "a") "org-agenda")
-        (stumpwm:define-key m (stumpwm:kbd "m") "emms")
-        (stumpwm:define-key m (stumpwm:kbd "k") "emacs-daemon-kill-soft")
-        (stumpwm:define-key m (stumpwm:kbd "K") "emacs-daemon-kill-soft")
-        m ; NOTE: this is important
-        ))
+  (let ((m (stumpwm:make-sparse-keymap)))
+    (stumpwm:define-key m (stumpwm:kbd "e") "emacs")
+    (stumpwm:define-key m (stumpwm:kbd "i") "org-contacts")
+    (stumpwm:define-key m (stumpwm:kbd "c") "calendar")
+    (stumpwm:define-key m (stumpwm:kbd "s") "eshell")
+    (stumpwm:define-key m (stumpwm:kbd "g") "gnus")
+    (stumpwm:define-key m (stumpwm:kbd "a") "org-agenda")
+    (stumpwm:define-key m (stumpwm:kbd "m") "emms")
+    (stumpwm:define-key m (stumpwm:kbd "k") "emacs-daemon-kill-soft")
+    (stumpwm:define-key m (stumpwm:kbd "K") "emacs-daemon-kill-soft")
+    m ; NOTE: this is important
+    ))
 
 (defvar *org-capture-map*
-      (let ((m (stumpwm:make-sparse-keymap)))
-        (stumpwm:define-key m (stumpwm:kbd "d") "org-capture-notes")
-        (stumpwm:define-key m (stumpwm:kbd "e") "org-capture-simple")
-        (stumpwm:define-key m (stumpwm:kbd "c") "org-capture-contacts")
-        (stumpwm:define-key m (stumpwm:kbd "a") "org-capture-account")
-        (stumpwm:define-key m (stumpwm:kbd "j") "org-capture-journal")
-        (stumpwm:define-key m (stumpwm:kbd "t") "org-capture-todo")
-        (stumpwm:define-key m (stumpwm:kbd "s") "org-capture-schedule")
-        m ; NOTE: this is important
-        ))
+  (let ((m (stumpwm:make-sparse-keymap)))
+    (stumpwm:define-key m (stumpwm:kbd "d") "org-capture-notes")
+    (stumpwm:define-key m (stumpwm:kbd "e") "org-capture-simple")
+    (stumpwm:define-key m (stumpwm:kbd "c") "org-capture-contacts")
+    (stumpwm:define-key m (stumpwm:kbd "a") "org-capture-account")
+    (stumpwm:define-key m (stumpwm:kbd "j") "org-capture-journal")
+    (stumpwm:define-key m (stumpwm:kbd "t") "org-capture-todo")
+    (stumpwm:define-key m (stumpwm:kbd "s") "org-capture-schedule")
+    m ; NOTE: this is important
+    ))
 
 (defvar *help-map*
-      (let ((m (make-sparse-keymap)))
-        (define-key m (kbd "m") "man")
-        (define-key m (kbd "i") "info")
-        (define-key m (kbd "v") "describe-variable")
-        (define-key m (kbd "f") "describe-function")
-        (define-key m (kbd "k") "describe-key")
-        (define-key m (kbd "w") "where-is")
-        m))
+  (let ((m (make-sparse-keymap)))
+    (define-key m (kbd "m") "man")
+    (define-key m (kbd "i") "info")
+    (define-key m (kbd "v") "describe-variable")
+    (define-key m (kbd "f") "describe-function")
+    (define-key m (kbd "k") "describe-key")
+    (define-key m (kbd "w") "where-is")
+    m))
 
 (stumpwm:define-key stumpwm:*root-map* (stumpwm:kbd "f") '*applications-map*)
 (stumpwm:define-key stumpwm:*root-map* (stumpwm:kbd "e") '*emacs-map*)
