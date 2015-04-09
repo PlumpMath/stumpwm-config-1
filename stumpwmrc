@@ -291,14 +291,13 @@
       (with-standard-io-syntax
         (format stream "~A" expression-string))
 
+      ;; update *emacsclient-last-load-file*
+      (setf *emacsclient-last-load-file* elisp-file-name)
+
       ;; start emacs daemon.
       (if (not (emacs-daemon-run-p))
           (emacs-daemon-start)
-          (my-run-or-raise emacsclient-command `(:instance ,name)))
-
-      ;; update *emacsclient-last-load-file*
-      (setf *emacsclient-last-load-file* elisp-file-name)
-      t)))
+          (my-run-or-raise emacsclient-command `(:instance ,name))))))
 
 (defcommand emacs () ()
             (emacsclient-eval '(recentf-open-files) t "emacs"))
