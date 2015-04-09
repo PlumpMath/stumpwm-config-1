@@ -243,8 +243,10 @@
 
 (defun generate-elisp-expression-string (expression)
   (cl-ppcre:regex-replace-all
-   "stumpwm::"
-   (write-to-string expression :case :downcase) ""))
+   "stumpwm:"
+   (cl-ppcre:regex-replace-all
+    "stumpwm::"
+    (write-to-string expression :case :downcase) "") ""))
 
 (defcommand bare-emacs-run (expression) ()
             (let ((expression-string
